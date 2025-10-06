@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale-1.0">
+    <title>Easy Essay</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+    <div class="main-container">
+        <div class="input-panel">
+            <form id="outline-form">
+                <h1>Easy Essay</h1>
+                <label for="subject">学科主题</label>
+                <input type="text" id="subject" name="subject" placeholder="例如：市场营销与企业战略" required>
+                <label for="requirements">作业要求</label>
+                <textarea id="requirements" name="requirements" rows="10" placeholder="请在此处粘贴详细的作业要求..." required></textarea>
+                <label for="rubric">得分标准 (可选)</label>
+                <textarea id="rubric" name="rubric" rows="6" placeholder="请在此处粘贴评分标准，以获得更高质量的大纲..."></textarea>
+                <button type="submit" id="generate-btn">生成大纲</button>
+            </form>
+        </div>
+        <div class="output-panel">
+            <div id="status-display" class="status-hidden">模型思考中，请稍候...</div>
+            <div id="result-container"></div>
+        </div>
+    </div>
+    
+    <script src="main.js"></script>
+
+</body>
+</html>
