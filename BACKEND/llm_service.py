@@ -1,8 +1,7 @@
 # llm_service.py (v3 - No File I/O)
 
 from openai import OpenAI
-# 直接从 config 导入所有需要的变量，包括 SYSTEM_PROMPT
-from config import YOUR_LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, SYSTEM_PROMPT
+from .config import YOUR_LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, SYSTEM_PROMPT
 
 class LLMService:
     def __init__(self):
