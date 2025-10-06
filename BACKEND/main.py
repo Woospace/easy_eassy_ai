@@ -2,7 +2,7 @@
 
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for
 from flask_cors import CORS
-from llm_service import llm_service
+from .llm_service import llm_service
 import os
 
 # --- 应用初始化 ---
