@@ -1,87 +1,108 @@
-# main.py (Cloud-Ready Version)
+# main.py
 
+import os
+import firebase_admin
+from functools import wraps
+from firebase_admin import credentials, auth
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for
 from flask_cors import CORS
 from .llm_service import llm_service
-import os
 
-# --- 应用初始化 ---
-# 将 app 的创建放在全局范围内，这是 WSGI 服务器 (如 Gunicorn) 发现和运行应用所必需的。
+# --- App Initialization ---
 app = Flask(__name__)
+CORS(app)
+# SECRET_KEY 建议从环境变量加载，以确保生产环境安全
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-secret-key-for-dev')
 
-# --- 安全配置 ---
-# 1. CORS: 在生产环境中，应限制为仅允许您的前端域名访问，而不是 "*" (所有)。
-#    例如: CORS(app, origins=["https://your-frontend-domain.onrender.com"])
-CORS(app) 
+# --- Firebase Admin SDK Initialization ---
+# 自动适配 Render 部署环境与本地开发环境的凭证路径
+try:
+    render_secret_path = "/etc/secrets/firebase_credentials_json"
+    local_relative_path = os.path.join(os.path.dirname(__file__), '..', 'easy-essay-ai-firebase-adminsdk-fbsvc-866e0e5dc6.json')
 
-# 2. 密钥管理: 所有敏感信息都必须从环境变量中读取，确保代码库中不包含任何机密。
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-CORRECT_ACCESS_CODE = os.environ.get('ACCESS_CODE')
+    if os.path.exists(render_secret_path):
+        cred_path = render_secret_path
+    elif os.path.exists(local_relative_path):
+        cred_path = local_relative_path
+    else:
+        raise FileNotFoundError("Firebase credentials JSON not found.")
 
-# --- 安全响应头 ---
+    cred = credentials.Certificate(cred_path)
+    firebase_admin.initialize_app(cred)
+    app.logger.info("Firebase Admin SDK initialized successfully.")
+except Exception as e:
+    app.logger.critical(f"FATAL: Failed to initialize Firebase Admin SDK: {e}")
+
+# --- Decorator for Authentication ---
+def login_required(f):
+    """
+    一个装饰器，用于保护需要用户登录才能访问的路由。
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('authenticated'):
+            # API请求返回JSON错误，页面请求重定向到登录页
+            if request.path.startswith('/generate_outline'):
+                 return jsonify({"error": "Unauthorized"}), 403
+            return redirect(url_for('serve_landing_page'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# --- Security Headers ---
 @app.after_request
 def add_security_headers(response):
-    """为所有响应添加安全头，禁用浏览器缓存，防止未授权用户通过浏览器历史返回访问受保护页面。"""
+    """为所有响应添加安全头，禁用浏览器缓存。"""
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '-1'
     return response
 
-# --- 路由定义 ---
+# --- Route Definitions ---
 
 @app.route("/")
 def serve_landing_page():
-    # 使用相对安全的 send_from_directory 提供前端入口文件
+    """提供公共的登录页面。"""
     return send_from_directory("../FRONTEND", "landing.html")
 
 @app.route("/index")
+@login_required
 def serve_index_page():
-    # 核心授权检查：确保在提供受保护内容前，session 中有有效的认证标志
-    if session.get('authenticated'):
-        return send_from_directory("../FRONTEND", "index.html")
-    return redirect(url_for('serve_landing_page'))
+    """提供受保护的主应用页面。"""
+    return send_from_directory("../FRONTEND", "index.html")
 
-@app.route("/verify_code", methods=["POST"])
-def verify_access_code():
-    data = request.get_json()
-    if not data or "code" not in data:
-        return jsonify({"success": False, "error": "无效请求"}), 400
+@app.route("/google-login", methods=["POST"])
+def google_login():
+    """验证前端发送的Google ID Token，并创建用户会话。"""
+    token = request.json.get("token")
+    if not token:
+        return jsonify({"success": False, "error": "ID Token is missing"}), 400
 
-    # 注意：为了防范暴力破解，生产环境应在此处增加速率限制 (rate limiting)
-    if data["code"] == CORRECT_ACCESS_CODE:
+    try:
+        decoded_token = auth.verify_id_token(token)
         session['authenticated'] = True
+        session['uid'] = decoded_token['uid']
         return jsonify({"success": True})
-    else:
-        session.pop('authenticated', None)
-        return jsonify({"success": False, "error": "访问码不正确"}), 401
+    except Exception as e:
+        app.logger.error(f"Token verification failed: {e}")
+        return jsonify({"success": False, "error": "Invalid or expired ID Token"}), 401
 
 @app.route("/generate_outline", methods=["POST"])
+@login_required
 def generate_outline_handler():
-    if not session.get('authenticated'):
-        return jsonify({"error": "未授权"}), 403
-
+    """处理生成大纲的API请求，调用LLM服务。"""
     data = request.get_json()
-    # 确保关键数据存在，否则返回错误
     if not all(key in data for key in ["requirements", "rubric"]):
-        return jsonify({"error": "请求缺少必要参数"}), 400
+        return jsonify({"error": "Missing required parameters"}), 400
 
     subject = data.get("subject", "通用")
     try:
         outline = llm_service.generate_outline(subject, data["requirements"], data["rubric"])
         return jsonify({"outline": outline})
     except Exception as e:
-        # 在服务器日志中记录详细错误，但返回给用户通用错误信息，避免泄露内部实现细节
         app.logger.error(f"Outline generation failed: {e}")
-        return jsonify({"error": "服务器内部错误"}), 500
+        return jsonify({"error": "Internal server error during outline generation"}), 500
 
 @app.route('/<path:filename>')
 def serve_static_files(filename):
-    # 统一处理所有其他前端静态文件请求
+    """统一处理所有前端静态文件的请求（如CSS, JS文件）。"""
     return send_from_directory('../FRONTEND', filename)
-
-# --- 移除本地开发服务器启动模块 ---
-# 在生产环境中，永远不应该使用 app.run()。
-# 应用的启动和运行完全由 Gunicorn 这样的 WSGI 服务器来管理。
-# 移除此部分可以防止在配置错误时意外启动不安全的开发服务器。
-# if __name__ == "__main__":
-#     app.run(host="0.0.0.0", port=8000, debug=True)
